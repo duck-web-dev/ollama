@@ -777,24 +777,12 @@ type PullRequest struct {
 }
 
 // ProgressResponse is the response passed to progress functions like
-// [PullProgressFunc] and [PushProgressFunc].
+// [PullProgressFunc].
 type ProgressResponse struct {
 	Status    string `json:"status"`
 	Digest    string `json:"digest,omitempty"`
 	Total     int64  `json:"total,omitempty"`
 	Completed int64  `json:"completed,omitempty"`
-}
-
-// PushRequest is the request passed to [Client.Push].
-type PushRequest struct {
-	Model    string `json:"model"`
-	Insecure bool   `json:"insecure,omitempty"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Stream   *bool  `json:"stream,omitempty"`
-
-	// Deprecated: set the model name with Model instead
-	Name string `json:"name"`
 }
 
 // ListResponse is the response from [Client.List].

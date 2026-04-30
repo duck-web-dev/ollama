@@ -741,17 +741,6 @@ func TestManifestCaseSensitivity(t *testing.T) {
 	}))
 	checkManifestList()
 
-	t.Logf("pushing")
-	rr := createRequest(t, s.PushHandler, api.PushRequest{
-		Model:    name(),
-		Insecure: true,
-		Username: "alice",
-		Password: "x",
-	})
-	checkOK(rr)
-	if !strings.Contains(rr.Body.String(), `"status":"success"`) {
-		t.Errorf("got = %q, want success", rr.Body.String())
-	}
 }
 
 func TestShow(t *testing.T) {

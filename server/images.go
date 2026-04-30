@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -522,73 +521,6 @@ func PruneLayers() error {
 	}
 
 	slog.Info(fmt.Sprintf("total unused blobs removed: %d", len(deleteMap)))
-
-	return nil
-}
-
-func PushModel(ctx context.Context, name string, regOpts *registryOptions, fn func(api.ProgressResponse)) error {
-	n := model.ParseName(name)
-	fn(api.ProgressResponse{Status: "retrieving manifest"})
-
-	if n.ProtocolScheme == "http" && !regOpts.Insecure {
-		return errInsecureProtocol
-	}
-
-	mf, err := manifest.ParseNamedManifest(n)
-	if err != nil {
-		fn(api.ProgressResponse{Status: "couldn't retrieve manifest"})
-		return err
-	}
-
-	var layers []manifest.Layer
-	layers = append(layers, mf.Layers...)
-	if mf.Config.Digest != "" {
-		layers = append(layers, mf.Config)
-	}
-
-	// Use fast transfer for models with tensor layers (many small blobs)
-	if hasTensorLayers(layers) {
-		// Read raw manifest JSON to preserve tensor metadata fields
-		manifestPath, err := manifest.PathForName(n)
-		if err != nil {
-			return err
-		}
-		manifestJSON, err := os.ReadFile(manifestPath)
-		if err != nil {
-			return err
-		}
-		if err := pushWithTransfer(ctx, n, layers, manifestJSON, regOpts, fn); err != nil {
-			return err
-		}
-		fn(api.ProgressResponse{Status: "success"})
-		return nil
-	}
-
-	for _, layer := range layers {
-		if err := uploadBlob(ctx, n, layer, regOpts, fn); err != nil {
-			slog.Info(fmt.Sprintf("error uploading blob: %v", err))
-			return err
-		}
-	}
-
-	fn(api.ProgressResponse{Status: "pushing manifest"})
-	requestURL := n.BaseURL()
-	requestURL = requestURL.JoinPath("v2", n.DisplayNamespaceModel(), "manifests", n.Tag)
-
-	manifestJSON, err := json.Marshal(mf)
-	if err != nil {
-		return err
-	}
-
-	headers := make(http.Header)
-	headers.Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
-	resp, err := makeRequestWithRetry(ctx, http.MethodPut, requestURL, headers, bytes.NewReader(manifestJSON), regOpts)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	fn(api.ProgressResponse{Status: "success"})
 
 	return nil
 }

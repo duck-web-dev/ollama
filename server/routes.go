@@ -980,61 +980,6 @@ func (s *Server) PullHandler(c *gin.Context) {
 	streamResponse(c, ch)
 }
 
-func (s *Server) PushHandler(c *gin.Context) {
-	var req api.PushRequest
-	err := c.ShouldBindJSON(&req)
-	switch {
-	case errors.Is(err, io.EOF):
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing request body"})
-		return
-	case err != nil:
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	var mname string
-	if req.Model != "" {
-		mname = req.Model
-	} else if req.Name != "" {
-		mname = req.Name
-	} else {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "model is required"})
-		return
-	}
-
-	ch := make(chan any)
-	go func() {
-		defer close(ch)
-		fn := func(r api.ProgressResponse) {
-			ch <- r
-		}
-
-		regOpts := &registryOptions{
-			Insecure: req.Insecure,
-		}
-
-		ctx, cancel := context.WithCancel(c.Request.Context())
-		defer cancel()
-
-		name, err := getExistingName(model.ParseName(mname))
-		if err != nil {
-			ch <- gin.H{"error": err.Error()}
-			return
-		}
-
-		if err := PushModel(ctx, name.DisplayShortest(), regOpts, fn); err != nil {
-			ch <- gin.H{"error": err.Error()}
-		}
-	}()
-
-	if req.Stream != nil && !*req.Stream {
-		waitForStream(c, ch)
-		return
-	}
-
-	streamResponse(c, ch)
-}
-
 // getExistingName searches the models directory for the longest prefix match of
 // the input name and returns the input name with all existing parts replaced
 // with each part found. If no parts are found, the input name is returned as
@@ -1698,7 +1643,6 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 
 	// Local model cache management (new implementation is at end of function)
 	r.POST("/api/pull", s.PullHandler)
-	r.POST("/api/push", s.PushHandler)
 	r.HEAD("/api/tags", s.ListHandler)
 	r.GET("/api/tags", s.ListHandler)
 	r.POST("/api/show", s.ShowHandler)
