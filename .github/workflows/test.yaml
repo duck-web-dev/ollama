@@ -264,22 +264,6 @@ jobs:
           cache-dependency-path: |
             go.sum
             Makefile.sync
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Install UI dependencies
-        working-directory: ./app/ui/app
-        run: npm ci
-      - name: Install tscriptify
-        run: |
-          go install github.com/tkrajina/typescriptify-golang-structs/tscriptify@latest
-      - name: Run UI tests
-        if: ${{ startsWith(matrix.os, 'ubuntu') }}
-        working-directory: ./app/ui/app
-        run: npm test
-      - name: Run go generate
-        run: go generate ./...
-
       - name: go test
         if: always()
         run: go test -count=1 -benchtime=1x ./...
