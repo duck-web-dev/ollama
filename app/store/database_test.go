@@ -161,8 +161,8 @@ func TestMigrationV15ToV16LastHomeViewDefaultsToLaunch(t *testing.T) {
 		t.Fatalf("failed to read last_home_view: %v", err)
 	}
 
-	if lastHomeView != "launch" {
-		t.Fatalf("expected last_home_view to default to launch after migration, got %q", lastHomeView)
+	if lastHomeView != "chat" {
+		t.Fatalf("expected last_home_view to default to chat after migration, got %q", lastHomeView)
 	}
 
 	version, err := db.getSchemaVersion()

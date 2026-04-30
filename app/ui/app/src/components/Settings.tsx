@@ -274,8 +274,7 @@ export default function Settings() {
 
   const isWindows = navigator.platform.toLowerCase().includes("win");
   const handleCloseSettings = () => {
-    const chatId = settings.LastHomeView === "chat" ? "new" : "launch";
-    navigate({ to: "/c/$chatId", params: { chatId } });
+    navigate({ to: "/c/$chatId", params: { chatId: "new" } });
   };
 
   return (

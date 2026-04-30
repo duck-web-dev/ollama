@@ -38,9 +38,6 @@ import (
 	"golang.org/x/term"
 
 	"github.com/ollama/ollama/api"
-	"github.com/ollama/ollama/cmd/config"
-	"github.com/ollama/ollama/cmd/launch"
-	"github.com/ollama/ollama/cmd/tui"
 	"github.com/ollama/ollama/envconfig"
 	"github.com/ollama/ollama/format"
 	"github.com/ollama/ollama/internal/modelref"
@@ -57,43 +54,6 @@ import (
 	xcreateclient "github.com/ollama/ollama/x/create/client"
 	"github.com/ollama/ollama/x/imagegen"
 )
-
-func init() {
-	// Override default selectors to use Bubbletea TUI instead of raw terminal I/O.
-	launch.DefaultSingleSelector = func(title string, items []launch.ModelItem, current string) (string, error) {
-		if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-			return "", fmt.Errorf("model selection requires an interactive terminal; use --model to run in headless mode")
-		}
-		tuiItems := tui.ReorderItems(tui.ConvertItems(items))
-		result, err := tui.SelectSingle(title, tuiItems, current)
-		if errors.Is(err, tui.ErrCancelled) {
-			return "", launch.ErrCancelled
-		}
-		return result, err
-	}
-
-	launch.DefaultMultiSelector = func(title string, items []launch.ModelItem, preChecked []string) ([]string, error) {
-		if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-			return nil, fmt.Errorf("model selection requires an interactive terminal; use --model to run in headless mode")
-		}
-		tuiItems := tui.ReorderItems(tui.ConvertItems(items))
-		result, err := tui.SelectMultiple(title, tuiItems, preChecked)
-		if errors.Is(err, tui.ErrCancelled) {
-			return nil, launch.ErrCancelled
-		}
-		return result, err
-	}
-
-	launch.DefaultSignIn = func(modelName, signInURL string) (string, error) {
-		userName, err := tui.RunSignIn(modelName, signInURL)
-		if errors.Is(err, tui.ErrCancelled) {
-			return "", launch.ErrCancelled
-		}
-		return userName, err
-	}
-
-	launch.DefaultConfirmPrompt = tui.RunConfirmWithOptions
-}
 
 const ConnectInstructions = "If your browser did not open, navigate to:\n    %s\n\n"
 
@@ -2039,96 +1999,6 @@ func launchInteractiveModel(cmd *cobra.Command, modelName string) error {
 	return nil
 }
 
-// runInteractiveTUI runs the main interactive TUI menu.
-func runInteractiveTUI(cmd *cobra.Command) {
-	// Ensure the server is running before showing the TUI
-	if err := ensureServerRunning(cmd.Context()); err != nil {
-		fmt.Fprintf(os.Stderr, "Error starting server: %v\n", err)
-		return
-	}
-
-	deps := launcherDeps{
-		buildState:        launch.BuildLauncherState,
-		runMenu:           tui.RunMenu,
-		resolveRunModel:   launch.ResolveRunModel,
-		launchIntegration: launch.LaunchIntegration,
-		runModel:          launchInteractiveModel,
-	}
-
-	for {
-		continueLoop, err := runInteractiveTUIStep(cmd, deps)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
-		if !continueLoop {
-			return
-		}
-	}
-}
-
-type launcherDeps struct {
-	buildState        func(context.Context) (*launch.LauncherState, error)
-	runMenu           func(*launch.LauncherState) (tui.TUIAction, error)
-	resolveRunModel   func(context.Context, launch.RunModelRequest) (string, error)
-	launchIntegration func(context.Context, launch.IntegrationLaunchRequest) error
-	runModel          func(*cobra.Command, string) error
-}
-
-func runInteractiveTUIStep(cmd *cobra.Command, deps launcherDeps) (bool, error) {
-	state, err := deps.buildState(cmd.Context())
-	if err != nil {
-		return false, fmt.Errorf("build launcher state: %w", err)
-	}
-
-	action, err := deps.runMenu(state)
-	if err != nil {
-		return false, fmt.Errorf("run launcher menu: %w", err)
-	}
-
-	return runLauncherAction(cmd, action, deps)
-}
-
-func saveLauncherSelection(action tui.TUIAction) {
-	// Best effort only: this affects menu recall, not launch correctness.
-	_ = config.SetLastSelection(action.LastSelection())
-}
-
-func runLauncherAction(cmd *cobra.Command, action tui.TUIAction, deps launcherDeps) (bool, error) {
-	switch action.Kind {
-	case tui.TUIActionNone:
-		return false, nil
-	case tui.TUIActionRunModel:
-		saveLauncherSelection(action)
-		modelName, err := deps.resolveRunModel(cmd.Context(), action.RunModelRequest())
-		if errors.Is(err, launch.ErrCancelled) {
-			return true, nil
-		}
-		if err != nil {
-			return true, fmt.Errorf("selecting model: %w", err)
-		}
-		if err := deps.runModel(cmd, modelName); err != nil {
-			return true, err
-		}
-		return true, nil
-	case tui.TUIActionLaunchIntegration:
-		saveLauncherSelection(action)
-		err := deps.launchIntegration(cmd.Context(), action.IntegrationLaunchRequest())
-		if errors.Is(err, launch.ErrCancelled) {
-			return true, nil
-		}
-		if err != nil {
-			return true, fmt.Errorf("launching %s: %w", action.Integration, err)
-		}
-		// VS Code is a GUI app — exit the TUI loop after launching
-		if action.Integration == "vscode" {
-			return false, nil
-		}
-		return true, nil
-	default:
-		return false, fmt.Errorf("unknown launcher action: %d", action.Kind)
-	}
-}
-
 func NewCLI() *cobra.Command {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	cobra.EnableCommandSorting = false
@@ -2151,7 +2021,7 @@ func NewCLI() *cobra.Command {
 				return
 			}
 
-			runInteractiveTUI(cmd)
+			_ = cmd.Help()
 		},
 	}
 
@@ -2395,7 +2265,6 @@ func NewCLI() *cobra.Command {
 		copyCmd,
 		deleteCmd,
 		runnerCmd,
-		launch.LaunchCmd(checkServerHeartbeat, runInteractiveTUI),
 	)
 
 	return rootCmd

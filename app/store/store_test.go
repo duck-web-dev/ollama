@@ -81,18 +81,18 @@ func TestStore(t *testing.T) {
 		}
 	})
 
-	t.Run("settings default home view is launch", func(t *testing.T) {
+	t.Run("settings default home view is chat", func(t *testing.T) {
 		loaded, err := s.Settings()
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if loaded.LastHomeView != "launch" {
-			t.Fatalf("expected default LastHomeView to be launch, got %q", loaded.LastHomeView)
+		if loaded.LastHomeView != "chat" {
+			t.Fatalf("expected default LastHomeView to be chat, got %q", loaded.LastHomeView)
 		}
 	})
 
-	t.Run("settings empty home view falls back to launch", func(t *testing.T) {
+	t.Run("settings empty home view falls back to chat", func(t *testing.T) {
 		if err := s.SetSettings(Settings{LastHomeView: ""}); err != nil {
 			t.Fatal(err)
 		}
@@ -102,8 +102,8 @@ func TestStore(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if loaded.LastHomeView != "launch" {
-			t.Fatalf("expected empty LastHomeView to fall back to launch, got %q", loaded.LastHomeView)
+		if loaded.LastHomeView != "chat" {
+			t.Fatalf("expected empty LastHomeView to fall back to chat, got %q", loaded.LastHomeView)
 		}
 	})
 
