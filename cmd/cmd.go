@@ -403,6 +403,30 @@ func loadOrUnloadModel(cmd *cobra.Command, opts *runOptions) error {
 }
 
 func StopHandler(cmd *cobra.Command, args []string) error {
+	if args[0] == "all" {
+		client, err := api.ClientFromEnvironment()
+		if err != nil {
+			return err
+		}
+
+		models, err := client.ListRunning(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		for _, model := range models.Models {
+			opts := &runOptions{
+				Model:     model.Name,
+				KeepAlive: &api.Duration{Duration: 0},
+			}
+			if err := loadOrUnloadModel(cmd, opts); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
 	opts := &runOptions{
 		Model:     args[0],
 		KeepAlive: &api.Duration{Duration: 0},
@@ -2091,7 +2115,7 @@ func NewCLI() *cobra.Command {
 	runCmd.Flags().MarkHidden("imagegen")
 
 	stopCmd := &cobra.Command{
-		Use:     "stop MODEL",
+		Use:     "stop MODEL|all",
 		Short:   "Stop a running model",
 		Args:    cobra.ExactArgs(1),
 		PreRunE: checkServerHeartbeat,
