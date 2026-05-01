@@ -40,19 +40,6 @@ func (e StatusError) Error() string {
 	}
 }
 
-type AuthorizationError struct {
-	StatusCode int
-	Status     string
-	SigninURL  string `json:"signin_url"`
-}
-
-func (e AuthorizationError) Error() string {
-	if e.Status != "" {
-		return e.Status
-	}
-	return "something went wrong, please see the ollama server logs for details"
-}
-
 // ImageData represents the raw binary data of an image file.
 type ImageData []byte
 
@@ -808,16 +795,6 @@ type ProcessModelResponse struct {
 
 type TokenResponse struct {
 	Token string `json:"token"`
-}
-
-type CloudStatus struct {
-	Disabled bool   `json:"disabled"`
-	Source   string `json:"source"`
-}
-
-// StatusResponse is the response from [Client.CloudStatusExperimental].
-type StatusResponse struct {
-	Cloud CloudStatus `json:"cloud"`
 }
 
 // GenerateResponse is the response passed into [GenerateResponseFunc].

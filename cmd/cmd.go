@@ -30,7 +30,6 @@ import (
 	"github.com/containerd/console"
 	"github.com/mattn/go-runewidth"
 	"github.com/olekukonko/tablewriter"
-	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
@@ -50,8 +49,6 @@ import (
 	xcreateclient "github.com/ollama/ollama/x/create/client"
 	"github.com/ollama/ollama/x/imagegen"
 )
-
-const ConnectInstructions = "If your browser did not open, navigate to:\n    %s\n\n"
 
 // ensureThinkingSupport emits a warning if the model does not advertise thinking support
 func ensureThinkingSupport(ctx context.Context, client *api.Client, name string) {
@@ -446,7 +443,6 @@ func generateEmbedding(cmd *cobra.Command, modelName, input string, keepAlive *a
 	return nil
 }
 
-// TODO(parthsareen): consolidate with TUI signin flow
 func RunHandler(cmd *cobra.Command, args []string) error {
 	interactive := true
 
@@ -635,60 +631,6 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 	if err := generate(cmd, opts); err != nil {
 		return err
 	}
-	return nil
-}
-
-func SigninHandler(cmd *cobra.Command, args []string) error {
-	client, err := api.ClientFromEnvironment()
-	if err != nil {
-		return err
-	}
-
-	user, err := client.Whoami(cmd.Context())
-	if err != nil {
-		var aErr api.AuthorizationError
-		if errors.As(err, &aErr) && aErr.StatusCode == http.StatusUnauthorized {
-			fmt.Println("You need to be signed in to Ollama.")
-			fmt.Println()
-
-			if aErr.SigninURL != "" {
-				_ = browser.OpenURL(aErr.SigninURL)
-				fmt.Printf(ConnectInstructions, aErr.SigninURL)
-			}
-			return nil
-		}
-		return err
-	}
-
-	if user != nil && user.Name != "" {
-		fmt.Printf("You are already signed in as user '%s'\n", user.Name)
-		fmt.Println()
-		return nil
-	}
-
-	return nil
-}
-
-func SignoutHandler(cmd *cobra.Command, args []string) error {
-	client, err := api.ClientFromEnvironment()
-	if err != nil {
-		return err
-	}
-
-	err = client.Signout(cmd.Context())
-	if err != nil {
-		var aErr api.AuthorizationError
-		if errors.As(err, &aErr) && aErr.StatusCode == http.StatusUnauthorized {
-			fmt.Println("You are not signed in to ollama.com")
-			fmt.Println()
-			return nil
-		} else {
-			return err
-		}
-	}
-
-	fmt.Println("You have signed out of ollama.com")
-	fmt.Println()
 	return nil
 }
 
@@ -1899,40 +1841,6 @@ func NewCLI() *cobra.Command {
 
 	pullCmd.Flags().Bool("insecure", false, "Use an insecure registry")
 
-	signinCmd := &cobra.Command{
-		Use:     "signin",
-		Short:   "Sign in to ollama.com",
-		Args:    cobra.ExactArgs(0),
-		PreRunE: checkServerHeartbeat,
-		RunE:    SigninHandler,
-	}
-
-	loginCmd := &cobra.Command{
-		Use:     "login",
-		Short:   "Sign in to ollama.com",
-		Hidden:  true,
-		Args:    cobra.ExactArgs(0),
-		PreRunE: checkServerHeartbeat,
-		RunE:    SigninHandler,
-	}
-
-	signoutCmd := &cobra.Command{
-		Use:     "signout",
-		Short:   "Sign out from ollama.com",
-		Args:    cobra.ExactArgs(0),
-		PreRunE: checkServerHeartbeat,
-		RunE:    SignoutHandler,
-	}
-
-	logoutCmd := &cobra.Command{
-		Use:     "logout",
-		Short:   "Sign out from ollama.com",
-		Hidden:  true,
-		Args:    cobra.ExactArgs(0),
-		PreRunE: checkServerHeartbeat,
-		RunE:    SignoutHandler,
-	}
-
 	listCmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
@@ -2005,7 +1913,6 @@ func NewCLI() *cobra.Command {
 				envVars["OLLAMA_MAX_QUEUE"],
 				envVars["OLLAMA_MODELS"],
 				envVars["OLLAMA_NUM_PARALLEL"],
-				envVars["OLLAMA_NO_CLOUD"],
 				envVars["OLLAMA_NOPRUNE"],
 				envVars["OLLAMA_ORIGINS"],
 				envVars["OLLAMA_SCHED_SPREAD"],
@@ -2027,10 +1934,6 @@ func NewCLI() *cobra.Command {
 		runCmd,
 		stopCmd,
 		pullCmd,
-		signinCmd,
-		loginCmd,
-		signoutCmd,
-		logoutCmd,
 		listCmd,
 		psCmd,
 		copyCmd,

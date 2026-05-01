@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,7 +16,6 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"net/url"
 	"os"
 	"os/signal"
 	"slices"
@@ -32,12 +30,10 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ollama/ollama/api"
-	"github.com/ollama/ollama/auth"
 	"github.com/ollama/ollama/discover"
 	"github.com/ollama/ollama/envconfig"
 	"github.com/ollama/ollama/format"
 	"github.com/ollama/ollama/fs/ggml"
-	internalcloud "github.com/ollama/ollama/internal/cloud"
 	"github.com/ollama/ollama/llm"
 	"github.com/ollama/ollama/logutil"
 	"github.com/ollama/ollama/manifest"
@@ -55,8 +51,6 @@ import (
 	imagegenmanifest "github.com/ollama/ollama/x/imagegen/manifest"
 	xserver "github.com/ollama/ollama/x/server"
 )
-
-const signinURLStr = "https://ollama.com/connect?name=%s&key=%s"
 
 const (
 	copilotChatUserAgentPrefix            = "GitHubCopilotChat/"
@@ -172,17 +166,6 @@ func (s *Server) scheduleRunner(ctx context.Context, name string, caps []model.C
 	}
 
 	return runner.llama, model, &opts, nil
-}
-
-func signinURL() (string, error) {
-	pubKey, err := auth.GetPublicKey()
-	if err != nil {
-		return "", err
-	}
-
-	encKey := base64.RawURLEncoding.EncodeToString([]byte(pubKey))
-	h, _ := os.Hostname()
-	return fmt.Sprintf(signinURLStr, url.PathEscape(h), encKey), nil
 }
 
 func (s *Server) GenerateHandler(c *gin.Context) {
@@ -1456,7 +1439,6 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	r.GET("/", func(c *gin.Context) { c.String(http.StatusOK, "Ollama is running") })
 	r.HEAD("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"version": version.Version}) })
 	r.GET("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"version": version.Version}) })
-	r.GET("/api/status", s.StatusHandler)
 
 	// Local model cache management (new implementation is at end of function)
 	r.POST("/api/pull", s.PullHandler)
@@ -1464,12 +1446,6 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	r.GET("/api/tags", s.ListHandler)
 	r.POST("/api/show", s.ShowHandler)
 	r.DELETE("/api/delete", s.DeleteHandler)
-
-	r.POST("/api/me", s.WhoamiHandler)
-
-	r.POST("/api/signout", s.SignoutHandler)
-	// deprecated
-	r.DELETE("/api/user/keys/:encodedKey", s.SignoutHandler)
 
 	// Create
 	r.POST("/api/create", s.CreateHandler)
@@ -1518,9 +1494,6 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 func Serve(ln net.Listener) error {
 	slog.SetDefault(logutil.NewLogger(os.Stderr, envconfig.LogLevel()))
 	slog.Info("server config", "env", envconfig.Values())
-	cloudDisabled, _ := internalcloud.Status()
-	slog.Info(fmt.Sprintf("Ollama cloud disabled: %t", cloudDisabled))
-
 	blobsDir, err := manifest.BlobsPath("")
 	if err != nil {
 		return err
@@ -1713,80 +1686,6 @@ func streamResponse(c *gin.Context, ch chan any) {
 
 		return true
 	})
-}
-
-func (s *Server) StatusHandler(c *gin.Context) {
-	disabled, source := internalcloud.Status()
-	c.JSON(http.StatusOK, api.StatusResponse{
-		Cloud: api.CloudStatus{
-			Disabled: disabled,
-			Source:   source,
-		},
-	})
-}
-
-func (s *Server) WhoamiHandler(c *gin.Context) {
-	// todo allow other hosts
-	u, err := url.Parse("https://ollama.com")
-	if err != nil {
-		slog.Error(err.Error())
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "URL parse error"})
-		return
-	}
-
-	client := api.NewClient(u, http.DefaultClient)
-	user, err := client.Whoami(c)
-	if err != nil {
-		slog.Error(err.Error())
-	}
-
-	// user isn't signed in
-	if user != nil && user.Name == "" {
-		sURL, sErr := signinURL()
-		if sErr != nil {
-			slog.Error(sErr.Error())
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "error getting authorization details"})
-			return
-		}
-
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized", "signin_url": sURL})
-		return
-	}
-
-	c.JSON(http.StatusOK, user)
-}
-
-func (s *Server) SignoutHandler(c *gin.Context) {
-	pubKey, err := auth.GetPublicKey()
-	if err != nil {
-		slog.Error("couldn't get public key", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "there was an error signing out"})
-		return
-	}
-
-	encKey := base64.RawURLEncoding.EncodeToString([]byte(pubKey))
-
-	// todo allow other hosts
-	u, err := url.Parse("https://ollama.com")
-	if err != nil {
-		slog.Error(err.Error())
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "URL parse error"})
-		return
-	}
-
-	client := api.NewClient(u, http.DefaultClient)
-	err = client.Disconnect(c, encKey)
-	if err != nil {
-		var authError api.AuthorizationError
-		if errors.As(err, &authError) {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "you are not currently signed in"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "there was an error signing out"})
-		return
-	}
-
-	c.JSON(http.StatusOK, nil)
 }
 
 func (s *Server) PsHandler(c *gin.Context) {
