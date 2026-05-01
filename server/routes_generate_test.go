@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"strings"
 	"sync"
 	"testing"
