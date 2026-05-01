@@ -20,7 +20,6 @@ import (
 
 	"github.com/ollama/ollama/api"
 	internalcloud "github.com/ollama/ollama/internal/cloud"
-	"github.com/ollama/ollama/internal/modelref"
 	"github.com/ollama/ollama/progress"
 	"github.com/ollama/ollama/readline"
 	"github.com/ollama/ollama/types/model"
@@ -33,7 +32,7 @@ const (
 	// localModelTokenLimit is the token limit for local models (smaller context).
 	localModelTokenLimit = 4000
 
-	// defaultTokenLimit is the token limit for cloud/remote models.
+	// defaultTokenLimit is the token limit for non-local server cases.
 	defaultTokenLimit = 10000
 
 	// charsPerToken is a rough estimate of characters per token.
@@ -41,10 +40,9 @@ const (
 	charsPerToken = 4
 )
 
-// isLocalModel checks if the model is running locally (not a cloud model).
-// TODO: Improve local/cloud model identification - could check model metadata
 func isLocalModel(modelName string) bool {
-	return !modelref.HasExplicitCloudSource(modelName)
+	_ = modelName
+	return true
 }
 
 // isLocalServer checks if connecting to a local Ollama server.
@@ -78,7 +76,7 @@ func cloudStatusDisabled(ctx context.Context, client *api.Client) (disabled bool
 }
 
 // truncateToolOutput truncates tool output to prevent context overflow.
-// Uses a smaller limit (4k tokens) for local models, larger (10k) for cloud/remote.
+// Uses a smaller limit (4k tokens) for local models, larger (10k) otherwise.
 func truncateToolOutput(output, modelName string) string {
 	var tokenLimit int
 	if isLocalModel(modelName) && isLocalServer() {
@@ -287,7 +285,7 @@ func Chat(ctx context.Context, opts RunOptions) (*api.Message, error) {
 			var authErr api.AuthorizationError
 			if errors.As(err, &authErr) {
 				p.StopAndClear()
-				fmt.Fprintf(os.Stderr, "\033[1mauth required:\033[0m cloud model requires authentication\n")
+				fmt.Fprintf(os.Stderr, "\033[1mauth required:\033[0m authentication required\n")
 				result, promptErr := agent.PromptYesNo("Sign in to Ollama?")
 				if promptErr == nil && result {
 					if signinErr := waitForOllamaSignin(ctx); signinErr == nil {
@@ -992,27 +990,25 @@ func GenerateInteractive(cmd *cobra.Command, modelName string, wordWrap bool, op
 				continue
 			}
 
-			// For cloud models, no need to preload
-			if info.RemoteHost == "" {
-				// Preload the model by sending an empty generate request
-				req := &api.GenerateRequest{
-					Model: newModelName,
-					Think: think,
+			_ = info
+			// Preload the model by sending an empty generate request
+			req := &api.GenerateRequest{
+				Model: newModelName,
+				Think: think,
+			}
+			err = client.Generate(cmd.Context(), req, func(r api.GenerateResponse) error {
+				return nil
+			})
+			if err != nil {
+				p.StopAndClear()
+				if strings.Contains(err.Error(), "not found") {
+					fmt.Printf("Couldn't find model '%s'\n", newModelName)
+				} else if strings.Contains(err.Error(), "does not support thinking") {
+					fmt.Printf("error: %v\n", err)
+				} else {
+					fmt.Printf("error loading model: %v\n", err)
 				}
-				err = client.Generate(cmd.Context(), req, func(r api.GenerateResponse) error {
-					return nil
-				})
-				if err != nil {
-					p.StopAndClear()
-					if strings.Contains(err.Error(), "not found") {
-						fmt.Printf("Couldn't find model '%s'\n", newModelName)
-					} else if strings.Contains(err.Error(), "does not support thinking") {
-						fmt.Printf("error: %v\n", err)
-					} else {
-						fmt.Printf("error loading model: %v\n", err)
-					}
-					continue
-				}
+				continue
 			}
 
 			p.StopAndClear()

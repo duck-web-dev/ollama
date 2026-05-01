@@ -39,8 +39,8 @@ func TestResolveGemma4Renderer(t *testing.T) {
 		{
 			name: "legacy 31b tag resolves large",
 			model: &Model{
-				Name:      "gemma4:31b-cloud",
-				ShortName: "gemma4:31b-cloud",
+				Name:      "gemma4:31b",
+				ShortName: "gemma4:31b",
 				Config:    testConfigWithRenderer(gemma4RendererLegacy),
 			},
 			want: gemma4RendererLarge,

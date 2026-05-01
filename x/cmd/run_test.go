@@ -4,58 +4,6 @@ import (
 	"testing"
 )
 
-func TestIsLocalModel(t *testing.T) {
-	tests := []struct {
-		name      string
-		modelName string
-		expected  bool
-	}{
-		{
-			name:      "local model without suffix",
-			modelName: "llama3.2",
-			expected:  true,
-		},
-		{
-			name:      "local model with version",
-			modelName: "qwen2.5:7b",
-			expected:  true,
-		},
-		{
-			name:      "cloud model",
-			modelName: "gpt-oss:latest-cloud",
-			expected:  false,
-		},
-		{
-			name:      "cloud model with :cloud suffix",
-			modelName: "gpt-oss:cloud",
-			expected:  false,
-		},
-		{
-			name:      "cloud model with version",
-			modelName: "gpt-oss:20b-cloud",
-			expected:  false,
-		},
-		{
-			name:      "cloud model with version and :cloud suffix",
-			modelName: "gpt-oss:20b:cloud",
-			expected:  false,
-		},
-		{
-			name:      "empty model name",
-			modelName: "",
-			expected:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isLocalModel(tt.modelName)
-			if result != tt.expected {
-				t.Errorf("isLocalModel(%q) = %v, expected %v", tt.modelName, result, tt.expected)
-			}
-		})
-	}
-}
 
 func TestIsLocalServer(t *testing.T) {
 	tests := []struct {
@@ -140,22 +88,6 @@ func TestTruncateToolOutput(t *testing.T) {
 			host:          "",
 			shouldTrim:    true,
 			expectedLimit: localModelTokenLimit,
-		},
-		{
-			name:          "long output cloud model - uses 10k limit",
-			output:        string(localLimitOutput), // 20k chars, under 10k token limit
-			modelName:     "gpt-oss:latest-cloud",
-			host:          "",
-			shouldTrim:    false,
-			expectedLimit: defaultTokenLimit,
-		},
-		{
-			name:          "very long output cloud model - trimmed at 10k",
-			output:        string(defaultLimitOutput),
-			modelName:     "gpt-oss:latest-cloud",
-			host:          "",
-			shouldTrim:    true,
-			expectedLimit: defaultTokenLimit,
 		},
 		{
 			name:          "long output remote server - uses 10k limit",

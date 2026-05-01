@@ -17,7 +17,6 @@ import (
 	"github.com/ollama/ollama/api"
 	"github.com/ollama/ollama/envconfig"
 	internalcloud "github.com/ollama/ollama/internal/cloud"
-	"github.com/ollama/ollama/internal/modelref"
 	"github.com/ollama/ollama/logutil"
 )
 
@@ -872,14 +871,9 @@ func AnthropicMessagesMiddleware() gin.HandlerFunc {
 		}
 
 		if hasWebSearchTool(req.Tools) {
-			// Guard against runtime cloud-disable policy (OLLAMA_NO_CLOUD/server.json)
-			// for cloud models. Local models may still receive web_search tool definitions;
-			// execution is validated when the model actually emits a web_search tool call.
-			if isCloudModelName(req.Model) {
-				if disabled, _ := internalcloud.Status(); disabled {
-					c.AbortWithStatusJSON(http.StatusForbidden, anthropic.NewError(http.StatusForbidden, internalcloud.DisabledError("web search is unavailable")))
-					return
-				}
+			if disabled, _ := internalcloud.Status(); disabled {
+				c.AbortWithStatusJSON(http.StatusForbidden, anthropic.NewError(http.StatusForbidden, internalcloud.DisabledError("web search is unavailable")))
+				return
 			}
 
 			c.Writer = &WebSearchAnthropicWriter{
@@ -909,10 +903,6 @@ func hasWebSearchTool(tools []anthropic.Tool) bool {
 		}
 	}
 	return false
-}
-
-func isCloudModelName(name string) bool {
-	return modelref.HasExplicitCloudSource(name)
 }
 
 // extractQueryFromToolCall extracts the search query from a web_search tool call

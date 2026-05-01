@@ -78,8 +78,8 @@ func TestDisabledError(t *testing.T) {
 		t.Fatalf("expected %q, got %q", DisabledMessagePrefix, got)
 	}
 
-	want := DisabledMessagePrefix + ": remote inference is unavailable"
-	if got := DisabledError("remote inference is unavailable"); got != want {
+	want := DisabledMessagePrefix + ": feature is unavailable"
+	if got := DisabledError("feature is unavailable"); got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
 }

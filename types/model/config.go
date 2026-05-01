@@ -11,10 +11,7 @@ type ConfigV2 struct {
 	Parser        string   `json:"parser,omitempty"`
 	Requires      string   `json:"requires,omitempty"`
 
-	RemoteHost  string `json:"remote_host,omitempty"`
-	RemoteModel string `json:"remote_model,omitempty"`
-
-	// used for remotes
+	// runtime metadata
 	Capabilities []string `json:"capabilities,omitempty"`
 	ContextLen   int      `json:"context_length,omitempty"`
 	EmbedLen     int      `json:"embedding_length,omitempty"`

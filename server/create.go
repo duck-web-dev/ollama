@@ -10,11 +10,8 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -106,7 +103,6 @@ func (s *Server) CreateHandler(c *gin.Context) {
 
 		var baseLayers []*layerGGML
 		var err error
-		var remote bool
 
 		if r.From != "" {
 			slog.Debug("create model from model name", "from", r.From)
@@ -117,31 +113,15 @@ func (s *Server) CreateHandler(c *gin.Context) {
 			}
 
 			fromName := fromRef.Name
-			remoteHost := r.RemoteHost
-			if fromRef.Source == modelSourceCloud && remoteHost == "" {
-				remoteHost = cloudProxyBaseURL
-			}
-
-			if remoteHost != "" {
-				ru, err := remoteURL(remoteHost)
-				if err != nil {
-					ch <- gin.H{"error": "bad remote", "status": http.StatusBadRequest}
-					return
-				}
-
-				config.RemoteModel = fromRef.Base
-				config.RemoteHost = ru
-				remote = true
-			} else {
-				ctx, cancel := context.WithCancel(c.Request.Context())
-				defer cancel()
+			ctx, cancel := context.WithCancel(c.Request.Context())
+			defer cancel()
 
 				baseLayers, err = parseFromModel(ctx, fromName, fn)
 				if err != nil {
 					ch <- gin.H{"error": err.Error()}
 				}
 
-				if err == nil && !remote {
+			if err == nil {
 					mf, mErr := manifest.ParseNamedManifest(fromName)
 					if mErr == nil && mf.Config.Digest != "" {
 						configPath, pErr := manifest.BlobsPath(mf.Config.Digest)
@@ -169,7 +149,6 @@ func (s *Server) CreateHandler(c *gin.Context) {
 							}
 						}
 					}
-				}
 			}
 		} else if r.Files != nil {
 			baseLayers, err = convertModelFromFiles(r.Files, baseLayers, false, fn)
@@ -189,7 +168,7 @@ func (s *Server) CreateHandler(c *gin.Context) {
 		}
 
 		var adapterLayers []*layerGGML
-		if !remote && r.Adapters != nil {
+		if r.Adapters != nil {
 			adapterLayers, err = convertModelFromFiles(r.Adapters, baseLayers, true, fn)
 			if err != nil {
 				for _, badReq := range []error{errNoFilesProvided, errOnlyOneAdapterSupported, errOnlyGGUFSupported, errUnknownType, errFilePath} {
@@ -280,51 +259,6 @@ func (s *Server) CreateHandler(c *gin.Context) {
 	}
 
 	streamResponse(c, ch)
-}
-
-func remoteURL(raw string) (string, error) {
-	// Special‑case: user supplied only a path ("/foo/bar").
-	if strings.HasPrefix(raw, "/") {
-		return (&url.URL{
-			Scheme: "http",
-			Host:   net.JoinHostPort("localhost", "11434"),
-			Path:   path.Clean(raw),
-		}).String(), nil
-	}
-
-	if !strings.Contains(raw, "://") {
-		raw = "http://" + raw
-	}
-
-	if raw == "ollama.com" || raw == "http://ollama.com" {
-		raw = "https://ollama.com:443"
-	}
-
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "", fmt.Errorf("parse error: %w", err)
-	}
-
-	if u.Host == "" {
-		u.Host = "localhost"
-	}
-
-	hostPart, portPart, err := net.SplitHostPort(u.Host)
-	if err == nil {
-		u.Host = net.JoinHostPort(hostPart, portPart)
-	} else {
-		u.Host = net.JoinHostPort(u.Host, "11434")
-	}
-
-	if u.Path != "" {
-		u.Path = path.Clean(u.Path)
-	}
-
-	if u.Path == "/" {
-		u.Path = ""
-	}
-
-	return u.String(), nil
 }
 
 func convertModelFromFiles(files map[string]string, baseLayers []*layerGGML, isAdapter bool, fn func(resp api.ProgressResponse)) ([]*layerGGML, error) {

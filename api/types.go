@@ -535,12 +535,6 @@ type ChatResponse struct {
 	// Model is the model name that generated the response.
 	Model string `json:"model"`
 
-	// RemoteModel is the name of the upstream model that generated the response.
-	RemoteModel string `json:"remote_model,omitempty"`
-
-	// RemoteHost is the URL of the upstream Ollama host that generated the response.
-	RemoteHost string `json:"remote_host,omitempty"`
-
 	// CreatedAt is the timestamp of the response.
 	CreatedAt time.Time `json:"created_at"`
 
@@ -675,9 +669,6 @@ type CreateRequest struct {
 	// From is the name of the model or file to use as the source.
 	From string `json:"from,omitempty"`
 
-	// RemoteHost is the URL of the upstream ollama API for the model (if any).
-	RemoteHost string `json:"remote_host,omitempty"`
-
 	// Files is a map of files include when creating the model.
 	Files map[string]string `json:"files,omitempty"`
 
@@ -748,8 +739,6 @@ type ShowResponse struct {
 	Parser        string             `json:"parser,omitempty"`
 	Details       ModelDetails       `json:"details,omitempty"`
 	Messages      []Message          `json:"messages,omitempty"`
-	RemoteModel   string             `json:"remote_model,omitempty"`
-	RemoteHost    string             `json:"remote_host,omitempty"`
 	ModelInfo     map[string]any     `json:"model_info"`
 	ProjectorInfo map[string]any     `json:"projector_info,omitempty"`
 	Tensors       []Tensor           `json:"tensors,omitempty"`
@@ -790,20 +779,6 @@ type ListResponse struct {
 	Models []ListModelResponse `json:"models"`
 }
 
-// ModelRecommendationsResponse is the response from [Client.ModelRecommendationsExperimental].
-type ModelRecommendationsResponse struct {
-	Recommendations []ModelRecommendation `json:"recommendations"`
-}
-
-// ModelRecommendation is a single recommendation entry in [ModelRecommendationsResponse].
-type ModelRecommendation struct {
-	Model           string `json:"model"`
-	Description     string `json:"description"`
-	ContextLength   int    `json:"context_length,omitempty"`
-	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
-	VRAMBytes       int64  `json:"vram_bytes,omitempty"`
-}
-
 // ProcessResponse is the response from [Client.Process].
 type ProcessResponse struct {
 	Models []ProcessModelResponse `json:"models"`
@@ -811,14 +786,12 @@ type ProcessResponse struct {
 
 // ListModelResponse is a single model description in [ListResponse].
 type ListModelResponse struct {
-	Name        string       `json:"name"`
-	Model       string       `json:"model"`
-	RemoteModel string       `json:"remote_model,omitempty"`
-	RemoteHost  string       `json:"remote_host,omitempty"`
-	ModifiedAt  time.Time    `json:"modified_at"`
-	Size        int64        `json:"size"`
-	Digest      string       `json:"digest"`
-	Details     ModelDetails `json:"details,omitempty"`
+	Name       string       `json:"name"`
+	Model      string       `json:"model"`
+	ModifiedAt time.Time    `json:"modified_at"`
+	Size       int64        `json:"size"`
+	Digest     string       `json:"digest"`
+	Details    ModelDetails `json:"details,omitempty"`
 }
 
 // ProcessModelResponse is a single model description in [ProcessResponse].
@@ -851,12 +824,6 @@ type StatusResponse struct {
 type GenerateResponse struct {
 	// Model is the model name that generated the response.
 	Model string `json:"model"`
-
-	// RemoteModel is the name of the upstream model that generated the response.
-	RemoteModel string `json:"remote_model,omitempty"`
-
-	// RemoteHost is the URL of the upstream Ollama host that generated the response.
-	RemoteHost string `json:"remote_host,omitempty"`
 
 	// CreatedAt is the timestamp of the response.
 	CreatedAt time.Time `json:"created_at"`

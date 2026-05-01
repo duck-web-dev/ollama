@@ -59,8 +59,6 @@ import (
 const signinURLStr = "https://ollama.com/connect?name=%s&key=%s"
 
 const (
-	cloudErrRemoteInferenceUnavailable    = "remote model is unavailable"
-	cloudErrRemoteModelDetailsUnavailable = "remote model details are unavailable"
 	cloudErrWebSearchUnavailable          = "web search is unavailable"
 	cloudErrWebFetchUnavailable           = "web fetch is unavailable"
 	copilotChatUserAgentPrefix            = "GitHubCopilotChat/"
@@ -68,8 +66,6 @@ const (
 
 func writeModelRefParseError(c *gin.Context, err error, fallbackStatus int, fallbackMessage string) {
 	switch {
-	case errors.Is(err, errConflictingModelSource):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, model.ErrUnqualifiedName):
 		c.JSON(http.StatusBadRequest, gin.H{"error": errtypes.InvalidModelNameErrMsg})
 	default:
@@ -102,7 +98,6 @@ type Server struct {
 	sched                *Scheduler
 	defaultNumCtx        int
 	requestLogger        *inferenceRequestLogger
-	modelRecommendations *modelRecommendationsCache
 }
 
 func init() {
@@ -214,14 +209,6 @@ func (s *Server) GenerateHandler(c *gin.Context) {
 		return
 	}
 
-	if modelRef.Source == modelSourceCloud {
-		// TODO(drifkin): evaluate an `/api/*` passthrough for cloud where the
-		// original body (modulo model name normalization) is sent to cloud.
-		req.Model = modelRef.Base
-		proxyCloudJSONRequest(c, req, cloudErrRemoteInferenceUnavailable)
-		return
-	}
-
 	name := modelRef.Name
 
 	// We cannot currently consolidate this into GetModel because all we'll
@@ -247,106 +234,6 @@ func (s *Server) GenerateHandler(c *gin.Context) {
 
 	if req.TopLogprobs < 0 || req.TopLogprobs > 20 {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "top_logprobs must be between 0 and 20"})
-		return
-	}
-
-	if modelRef.Source == modelSourceLocal && m.Config.RemoteHost != "" && m.Config.RemoteModel != "" {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("model '%s' not found", req.Model)})
-		return
-	}
-
-	if m.Config.RemoteHost != "" && m.Config.RemoteModel != "" {
-		if disabled, _ := internalcloud.Status(); disabled {
-			c.JSON(http.StatusForbidden, gin.H{"error": internalcloud.DisabledError(cloudErrRemoteInferenceUnavailable)})
-			return
-		}
-
-		origModel := req.Model
-
-		remoteURL, err := url.Parse(m.Config.RemoteHost)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		if !slices.Contains(envconfig.Remotes(), remoteURL.Hostname()) {
-			slog.Info("remote model", "remotes", envconfig.Remotes(), "remoteURL", m.Config.RemoteHost, "hostname", remoteURL.Hostname())
-			c.JSON(http.StatusBadRequest, gin.H{"error": "this server cannot run this remote model"})
-			return
-		}
-
-		req.Model = m.Config.RemoteModel
-
-		if req.Template == "" && m.Template.String() != "" {
-			req.Template = m.Template.String()
-		}
-
-		if req.Options == nil {
-			req.Options = map[string]any{}
-		}
-
-		for k, v := range m.Options {
-			if _, ok := req.Options[k]; !ok {
-				req.Options[k] = v
-			}
-		}
-
-		// update the system prompt from the model if one isn't already specified
-		if req.System == "" && m.System != "" {
-			req.System = m.System
-		}
-
-		if len(m.Messages) > 0 {
-			slog.Warn("embedded messages in the model not supported with '/api/generate'; try '/api/chat' instead")
-		}
-
-		contentType := "application/x-ndjson"
-		if req.Stream != nil && !*req.Stream {
-			contentType = "application/json; charset=utf-8"
-		}
-		c.Header("Content-Type", contentType)
-
-		fn := func(resp api.GenerateResponse) error {
-			resp.Model = origModel
-			resp.RemoteModel = m.Config.RemoteModel
-			resp.RemoteHost = m.Config.RemoteHost
-
-			data, err := json.Marshal(resp)
-			if err != nil {
-				return err
-			}
-
-			if _, err = c.Writer.Write(append(data, '\n')); err != nil {
-				return err
-			}
-			c.Writer.Flush()
-			return nil
-		}
-
-		client := api.NewClient(remoteURL, http.DefaultClient)
-		err = client.Generate(c, &req, fn)
-		if err != nil {
-			var authError api.AuthorizationError
-			if errors.As(err, &authError) {
-				sURL, sErr := signinURL()
-				if sErr != nil {
-					slog.Error(sErr.Error())
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "error getting authorization details"})
-					return
-				}
-
-				c.JSON(authError.StatusCode, gin.H{"error": "unauthorized", "signin_url": sURL})
-				return
-			}
-			var apiError api.StatusError
-			if errors.As(err, &apiError) {
-				c.JSON(apiError.StatusCode, apiError)
-				return
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
 		return
 	}
 
@@ -704,12 +591,6 @@ func (s *Server) EmbedHandler(c *gin.Context) {
 		return
 	}
 
-	if modelRef.Source == modelSourceCloud {
-		req.Model = modelRef.Base
-		proxyCloudJSONRequest(c, req, cloudErrRemoteInferenceUnavailable)
-		return
-	}
-
 	var input []string
 
 	switch i := req.Input.(type) {
@@ -885,12 +766,6 @@ func (s *Server) EmbeddingsHandler(c *gin.Context) {
 		return
 	}
 
-	if modelRef.Source == modelSourceCloud {
-		req.Model = modelRef.Base
-		proxyCloudJSONRequest(c, req, cloudErrRemoteInferenceUnavailable)
-		return
-	}
-
 	name := modelRef.Name
 
 	r, _, _, err := s.scheduleRunner(c.Request.Context(), name.String(), []model.Capability{}, req.Options, req.KeepAlive)
@@ -934,12 +809,7 @@ func (s *Server) PullHandler(c *gin.Context) {
 		return
 	}
 
-	// TEMP(drifkin): we're temporarily allowing to continue pulling cloud model
-	// stub-files until we integrate cloud models into `/api/tags` (in which case
-	// this roundabout way of "adding" cloud models won't be needed anymore). So
-	// right here normalize any `:cloud` models into the legacy-style suffixes
-	// `:<tag>-cloud` and `:cloud`
-	modelRef, err := parseNormalizePullModelRef(cmp.Or(req.Model, req.Name))
+	modelRef, err := parseAndValidateModelRef(cmp.Or(req.Model, req.Name))
 	if err != nil {
 		writeModelRefParseError(c, err, http.StatusBadRequest, errtypes.InvalidModelNameErrMsg)
 		return
@@ -1018,11 +888,9 @@ func (s *Server) DeleteHandler(c *gin.Context) {
 		return
 	}
 
-	modelRef, err := parseNormalizePullModelRef(cmp.Or(r.Model, r.Name))
+	modelRef, err := parseAndValidateModelRef(cmp.Or(r.Model, r.Name))
 	if err != nil {
 		switch {
-		case errors.Is(err, errConflictingModelSource):
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case errors.Is(err, model.ErrUnqualifiedName):
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("name %q is invalid", cmp.Or(r.Model, r.Name))})
 		default:
@@ -1086,12 +954,6 @@ func (s *Server) ShowHandler(c *gin.Context) {
 		return
 	}
 
-	if modelRef.Source == modelSourceCloud {
-		req.Model = modelRef.Base
-		proxyCloudJSONRequest(c, req, cloudErrRemoteModelDetailsUnavailable)
-		return
-	}
-
 	req.Model = modelRef.Base
 
 	resp, err := GetModelInfo(req)
@@ -1107,11 +969,6 @@ func (s *Server) ShowHandler(c *gin.Context) {
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
-		return
-	}
-
-	if modelRef.Source == modelSourceLocal && resp.RemoteHost != "" {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("model '%s' not found", modelRef.Original)})
 		return
 	}
 
@@ -1142,15 +999,6 @@ func GetModelInfo(req api.ShowRequest) (*api.ShowResponse, error) {
 	m, err := GetModel(name.String())
 	if err != nil {
 		return nil, err
-	}
-
-	if m.Config.RemoteHost != "" {
-		if disabled, _ := internalcloud.Status(); disabled {
-			return nil, api.StatusError{
-				StatusCode:   http.StatusForbidden,
-				ErrorMessage: internalcloud.DisabledError(cloudErrRemoteModelDetailsUnavailable),
-			}
-		}
 	}
 
 	modelDetails := api.ModelDetails{
@@ -1217,28 +1065,6 @@ func GetModelInfo(req api.ShowRequest) (*api.ShowResponse, error) {
 		ModelInfo: make(map[string]any),
 	}
 
-	if m.Config.RemoteHost != "" {
-		resp.RemoteHost = m.Config.RemoteHost
-		resp.RemoteModel = m.Config.RemoteModel
-
-		if m.Config.ModelFamily != "" {
-			resp.ModelInfo = make(map[string]any)
-			resp.ModelInfo["general.architecture"] = m.Config.ModelFamily
-
-			if m.Config.BaseName != "" {
-				resp.ModelInfo["general.basename"] = m.Config.BaseName
-			}
-
-			if m.Config.ContextLen > 0 {
-				resp.ModelInfo[fmt.Sprintf("%s.context_length", m.Config.ModelFamily)] = m.Config.ContextLen
-			}
-
-			if m.Config.EmbedLen > 0 {
-				resp.ModelInfo[fmt.Sprintf("%s.embedding_length", m.Config.ModelFamily)] = m.Config.EmbedLen
-			}
-		}
-	}
-
 	var params []string
 	cs := 30
 	for k, v := range m.Options {
@@ -1276,11 +1102,6 @@ func GetModelInfo(req api.ShowRequest) (*api.ShowResponse, error) {
 		fmt.Fprint(&sb, modelfile)
 	}
 	resp.Modelfile = sb.String()
-
-	// skip loading tensor information if this is a remote model
-	if m.Config.RemoteHost != "" && m.Config.RemoteModel != "" {
-		return resp, nil
-	}
 
 	if slices.Contains(m.Capabilities(), model.CapabilityImage) {
 		// Populate tensor info if verbose
@@ -1384,8 +1205,6 @@ func (s *Server) ListHandler(c *gin.Context) {
 		models = append(models, api.ListModelResponse{
 			Model:       n.DisplayShortest(),
 			Name:        n.DisplayShortest(),
-			RemoteModel: cf.RemoteModel,
-			RemoteHost:  cf.RemoteHost,
 			Size:        m.Size(),
 			Digest:      m.Digest(),
 			ModifiedAt:  m.FileInfo().ModTime(),
@@ -1661,7 +1480,6 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	r.POST("/api/copy", s.CopyHandler)
 	r.POST("/api/experimental/web_search", s.WebSearchExperimentalHandler)
 	r.POST("/api/experimental/web_fetch", s.WebFetchExperimentalHandler)
-	r.GET("/api/experimental/model-recommendations", s.ModelRecommendationsExperimentalHandler)
 
 	// Inference
 	r.GET("/api/ps", s.PsHandler)
@@ -1671,22 +1489,20 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	r.POST("/api/embeddings", s.EmbeddingsHandler)
 
 	// Inference (OpenAI compatibility)
-	// TODO(cloud-stage-a): apply Modelfile overlay deltas for local models with cloud
-	// parents on v1 request families while preserving this explicit :cloud passthrough.
-	r.POST("/v1/chat/completions", s.withInferenceRequestLogging("/v1/chat/completions", cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable), middleware.ChatMiddleware(), s.ChatHandler)...)
-	r.POST("/v1/completions", s.withInferenceRequestLogging("/v1/completions", cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable), middleware.CompletionsMiddleware(), s.GenerateHandler)...)
-	r.POST("/v1/embeddings", cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable), middleware.EmbeddingsMiddleware(), s.EmbedHandler)
+	r.POST("/v1/chat/completions", s.withInferenceRequestLogging("/v1/chat/completions", middleware.ChatMiddleware(), s.ChatHandler)...)
+	r.POST("/v1/completions", s.withInferenceRequestLogging("/v1/completions", middleware.CompletionsMiddleware(), s.GenerateHandler)...)
+	r.POST("/v1/embeddings", middleware.EmbeddingsMiddleware(), s.EmbedHandler)
 	r.GET("/v1/models", middleware.ListMiddleware(), s.ListHandler)
-	r.GET("/v1/models/:model", cloudModelPathPassthroughMiddleware(cloudErrRemoteModelDetailsUnavailable), middleware.RetrieveMiddleware(), s.ShowHandler)
-	r.POST("/v1/responses", s.withInferenceRequestLogging("/v1/responses", cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable), middleware.ResponsesMiddleware(), s.ChatHandler)...)
+	r.GET("/v1/models/:model", middleware.RetrieveMiddleware(), s.ShowHandler)
+	r.POST("/v1/responses", s.withInferenceRequestLogging("/v1/responses", middleware.ResponsesMiddleware(), s.ChatHandler)...)
 	// OpenAI-compatible image generation endpoints
-	r.POST("/v1/images/generations", cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable), middleware.ImageGenerationsMiddleware(), s.GenerateHandler)
-	r.POST("/v1/images/edits", cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable), middleware.ImageEditsMiddleware(), s.GenerateHandler)
+	r.POST("/v1/images/generations", middleware.ImageGenerationsMiddleware(), s.GenerateHandler)
+	r.POST("/v1/images/edits", middleware.ImageEditsMiddleware(), s.GenerateHandler)
 	// OpenAI-compatible audio endpoint
 	r.POST("/v1/audio/transcriptions", middleware.TranscriptionMiddleware(), s.ChatHandler)
 
 	// Inference (Anthropic compatibility)
-	r.POST("/v1/messages", s.withInferenceRequestLogging("/v1/messages", cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable), middleware.AnthropicMessagesMiddleware(), s.ChatHandler)...)
+	r.POST("/v1/messages", s.withInferenceRequestLogging("/v1/messages", middleware.AnthropicMessagesMiddleware(), s.ChatHandler)...)
 
 	if rc != nil {
 		// wrap old with new
@@ -1701,24 +1517,6 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	}
 
 	return r, nil
-}
-
-func (s *Server) ModelRecommendationsExperimentalHandler(c *gin.Context) {
-	recs := defaultModelRecommendations
-	source := "default"
-	if s.modelRecommendations != nil {
-		ctx := context.Background()
-		if c.Request != nil {
-			ctx = c.Request.Context()
-		}
-		recs = s.modelRecommendations.GetSWR(ctx)
-		source = "cache"
-	}
-
-	slog.Debug("serving model recommendations", "recommendation_source", source, "count", len(recs))
-	c.JSON(http.StatusOK, api.ModelRecommendationsResponse{
-		Recommendations: recs,
-	})
 }
 
 func Serve(ln net.Listener) error {
@@ -1758,10 +1556,7 @@ func Serve(ln net.Listener) error {
 	// TODO(parthsareen): If we add more runtime caches, prefer introducing a
 	// small cache manager owned by Server (for shared start/stop/health wiring)
 	// instead of adding one top-level field per cache here in Serve.
-	s := &Server{
-		addr:                 ln.Addr(),
-		modelRecommendations: newModelRecommendationsCache(),
-	}
+	s := &Server{addr: ln.Addr()}
 	if err := s.initRequestLogging(); err != nil {
 		return err
 	}
@@ -1786,8 +1581,6 @@ func Serve(ln net.Listener) error {
 	schedCtx, schedDone := context.WithCancel(ctx)
 	sched := InitScheduler(schedCtx)
 	s.sched = sched
-	s.modelRecommendations.Start(ctx)
-
 	slog.Info(fmt.Sprintf("Listening on %s (version %s)", ln.Addr(), version.Version))
 	srvr := &http.Server{
 		// Use http.DefaultServeMux so we get net/http/pprof for
@@ -1945,18 +1738,8 @@ func (s *Server) WebFetchExperimentalHandler(c *gin.Context) {
 }
 
 func (s *Server) webExperimentalProxyHandler(c *gin.Context, proxyPath, disabledOperation string) {
-	body, err := readRequestBody(c.Request)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	if len(bytes.TrimSpace(body)) == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing request body"})
-		return
-	}
-
-	proxyCloudRequestWithPath(c, body, proxyPath, disabledOperation)
+	_ = proxyPath
+	c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": internalcloud.DisabledError(disabledOperation)})
 }
 
 func (s *Server) WhoamiHandler(c *gin.Context) {
@@ -2102,16 +1885,6 @@ func (s *Server) ChatHandler(c *gin.Context) {
 		return
 	}
 
-	if modelRef.Source == modelSourceCloud {
-		req.Model = modelRef.Base
-		if c.GetBool(legacyCloudAnthropicKey) {
-			proxyCloudJSONRequestWithPath(c, req, "/api/chat", cloudErrRemoteInferenceUnavailable)
-			return
-		}
-		proxyCloudJSONRequest(c, req, cloudErrRemoteInferenceUnavailable)
-		return
-	}
-
 	name := modelRef.Name
 
 	name, err = getExistingName(name)
@@ -2138,11 +1911,6 @@ func (s *Server) ChatHandler(c *gin.Context) {
 		return
 	}
 
-	if modelRef.Source == modelSourceLocal && m.Config.RemoteHost != "" && m.Config.RemoteModel != "" {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("model '%s' not found", req.Model)})
-		return
-	}
-
 	// expire the runner
 	if len(req.Messages) == 0 && req.KeepAlive != nil && req.KeepAlive.Duration == 0 {
 		s.sched.expireRunner(m)
@@ -2154,98 +1922,6 @@ func (s *Server) ChatHandler(c *gin.Context) {
 			Done:       true,
 			DoneReason: "unload",
 		})
-		return
-	}
-
-	if m.Config.RemoteHost != "" && m.Config.RemoteModel != "" {
-		if disabled, _ := internalcloud.Status(); disabled {
-			c.JSON(http.StatusForbidden, gin.H{"error": internalcloud.DisabledError(cloudErrRemoteInferenceUnavailable)})
-			return
-		}
-
-		origModel := req.Model
-
-		remoteURL, err := url.Parse(m.Config.RemoteHost)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		if !slices.Contains(envconfig.Remotes(), remoteURL.Hostname()) {
-			slog.Info("remote model", "remotes", envconfig.Remotes(), "remoteURL", m.Config.RemoteHost, "hostname", remoteURL.Hostname())
-			c.JSON(http.StatusBadRequest, gin.H{"error": "this server cannot run this remote model"})
-			return
-		}
-
-		req.Model = m.Config.RemoteModel
-		if req.Options == nil {
-			req.Options = map[string]any{}
-		}
-
-		var msgs []api.Message
-		if len(req.Messages) > 0 {
-			msgs = append(m.Messages, req.Messages...)
-			if req.Messages[0].Role != "system" && m.System != "" {
-				msgs = append([]api.Message{{Role: "system", Content: m.System}}, msgs...)
-			}
-		}
-
-		msgs = filterThinkTags(msgs, m)
-		req.Messages = msgs
-
-		for k, v := range m.Options {
-			if _, ok := req.Options[k]; !ok {
-				req.Options[k] = v
-			}
-		}
-
-		contentType := "application/x-ndjson"
-		if req.Stream != nil && !*req.Stream {
-			contentType = "application/json; charset=utf-8"
-		}
-		c.Header("Content-Type", contentType)
-
-		fn := func(resp api.ChatResponse) error {
-			resp.Model = origModel
-			resp.RemoteModel = m.Config.RemoteModel
-			resp.RemoteHost = m.Config.RemoteHost
-
-			data, err := json.Marshal(resp)
-			if err != nil {
-				return err
-			}
-
-			if _, err = c.Writer.Write(append(data, '\n')); err != nil {
-				return err
-			}
-			c.Writer.Flush()
-			return nil
-		}
-
-		client := api.NewClient(remoteURL, http.DefaultClient)
-		err = client.Chat(c, &req, fn)
-		if err != nil {
-			var authError api.AuthorizationError
-			if errors.As(err, &authError) {
-				sURL, sErr := signinURL()
-				if sErr != nil {
-					slog.Error(sErr.Error())
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "error getting authorization details"})
-					return
-				}
-
-				c.JSON(authError.StatusCode, gin.H{"error": "unauthorized", "signin_url": sURL})
-				return
-			}
-			var apiError api.StatusError
-			if errors.As(err, &apiError) {
-				c.JSON(apiError.StatusCode, apiError)
-				return
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
 		return
 	}
 
