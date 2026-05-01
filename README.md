@@ -8,7 +8,9 @@
 
 Run LLMs on your hardware easily.
 
-Without privacy invasion.
+Without privacy invasion, without bloat.
 
 ## FAQ
-Reference the original ollama readme or docs.
+This is a personal project, it may not fit your usecase.
+
+For remaining questions reference the original ollama [readme](https://github.com/ollama/ollama/blob/main/README.md) or [docs](https://docs.ollama.com/).
