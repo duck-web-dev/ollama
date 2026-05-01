@@ -6,7 +6,7 @@
 
 # 🔒 Ollama
 
-Start building with open models.
+Run LLMs on your hardware easily.
 
 Without privacy invasion.
 
