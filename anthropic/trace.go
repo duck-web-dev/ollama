@@ -182,7 +182,7 @@ func traceAnthropicBlock(block map[string]any) map[string]any {
 		out["id"] = block["id"]
 		out["name"] = block["name"]
 		out["input"] = TraceCompactValue(block["input"], 0)
-	case "tool_result", "web_search_tool_result":
+	case "tool_result":
 		out["tool_use_id"] = block["tool_use_id"]
 		out["content"] = TraceCompactValue(block["content"], 0)
 	case "image":

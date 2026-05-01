@@ -59,8 +59,6 @@ import (
 const signinURLStr = "https://ollama.com/connect?name=%s&key=%s"
 
 const (
-	cloudErrWebSearchUnavailable          = "web search is unavailable"
-	cloudErrWebFetchUnavailable           = "web fetch is unavailable"
 	copilotChatUserAgentPrefix            = "GitHubCopilotChat/"
 )
 
@@ -1478,8 +1476,6 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	r.POST("/api/blobs/:digest", s.CreateBlobHandler)
 	r.HEAD("/api/blobs/:digest", s.HeadBlobHandler)
 	r.POST("/api/copy", s.CopyHandler)
-	r.POST("/api/experimental/web_search", s.WebSearchExperimentalHandler)
-	r.POST("/api/experimental/web_fetch", s.WebFetchExperimentalHandler)
 
 	// Inference
 	r.GET("/api/ps", s.PsHandler)
@@ -1727,19 +1723,6 @@ func (s *Server) StatusHandler(c *gin.Context) {
 			Source:   source,
 		},
 	})
-}
-
-func (s *Server) WebSearchExperimentalHandler(c *gin.Context) {
-	s.webExperimentalProxyHandler(c, "/api/web_search", cloudErrWebSearchUnavailable)
-}
-
-func (s *Server) WebFetchExperimentalHandler(c *gin.Context) {
-	s.webExperimentalProxyHandler(c, "/api/web_fetch", cloudErrWebFetchUnavailable)
-}
-
-func (s *Server) webExperimentalProxyHandler(c *gin.Context, proxyPath, disabledOperation string) {
-	_ = proxyPath
-	c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": internalcloud.DisabledError(disabledOperation)})
 }
 
 func (s *Server) WhoamiHandler(c *gin.Context) {
